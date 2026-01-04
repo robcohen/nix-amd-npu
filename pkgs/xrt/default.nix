@@ -112,13 +112,13 @@ stdenv.mkDerivation rec {
     find . -name "CMakeLists.txt" -exec sed -i 's/STATIC_LINK/-DSTATIC_DISABLED/g' {} \; || true
     find . -name "CMakeLists.txt" -exec sed -i 's/set_target_properties.*LINK_FLAGS.*-static.*)/# Disabled for Nix/g' {} \; || true
 
-    # Specifically patch the aiebu static linking
-    if [ -d src/runtime_src/core/common/aiebu ]; then
-      find src/runtime_src/core/common/aiebu -name "CMakeLists.txt" -exec sed -i \
-        -e 's/LINK_FLAGS "-static"/LINK_FLAGS ""/g' \
-        -e 's/"-static"/""/g' \
-        {} \;
-    fi
+    # Completely remove the aiebu utils directory (contains statically linked tools)
+    rm -rf src/runtime_src/core/common/aiebu/src/cpp/utils || true
+
+    # Also patch any CMakeLists that reference utils
+    find . -path "*/aiebu/*" -name "CMakeLists.txt" -exec sed -i \
+      -e 's|add_subdirectory(utils)|#add_subdirectory(utils)|g' \
+      {} \; || true
 
     # Disable the dynamic dependency checker (fails because we use dynamic linking)
     if [ -f src/runtime_src/core/common/aiebu/cmake/depends.cmake ]; then
