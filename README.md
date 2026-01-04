@@ -6,6 +6,14 @@ Nix flake for AMD Ryzen AI NPU support on NixOS.
 
 🚧 **Work in Progress** - This flake is under active development.
 
+### Build Status
+
+- XRT builds 596/894 targets successfully
+- Blocked on: aiebu tools require static linking which conflicts with Nix's dynamic linking model
+- Need to either:
+  1. Patch aiebu CMake to disable static builds entirely, or
+  2. Disable building the aiebu tools (they may not be needed for NPU runtime)
+
 ## What's Included
 
 - **xrt** - Xilinx Runtime (XRT) base library
