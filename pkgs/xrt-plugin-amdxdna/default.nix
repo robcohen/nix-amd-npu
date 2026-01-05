@@ -10,10 +10,21 @@
 , rapidjson
 , libdrm
 , elfutils
+, libuuid
+, libsystemtap
 , xrt
-, linuxHeaders ? null
-, kernel ? null
 }:
+
+let
+  # Fetch XRT source for internal headers
+  xrtSrc = fetchFromGitHub {
+    owner = "Xilinx";
+    repo = "XRT";
+    rev = "202610.2.21.21";
+    hash = "sha256-Foj33/U6waL81EzJ0ah66xCXEGWEkvhwmurKobfCevE=";
+    fetchSubmodules = true;
+  };
+in
 
 stdenv.mkDerivation rec {
   pname = "xrt-plugin-amdxdna";
@@ -41,31 +52,86 @@ stdenv.mkDerivation rec {
     rapidjson
     libdrm
     elfutils
+    libuuid
+    libsystemtap
     xrt
   ];
 
-  cmakeDir = "../xrt/plugin/src";
+  # Build from source root with our wrapper CMakeLists.txt
+  cmakeDir = "..";
 
   cmakeFlags = [
-    "-DCMAKE_INSTALL_PREFIX=${placeholder "out"}/opt/xilinx"
+    "-DCMAKE_INSTALL_PREFIX=${placeholder "out"}"
     "-DCMAKE_BUILD_TYPE=Release"
-    "-DDISABLE_WERROR=ON"
-    "-DXDNA_PLUGIN_VERSION_STRING=${pluginVersion}"
-    # Point to XRT installation
-    "-DXRT_INSTALL_PREFIX=${xrt}/opt/xilinx/xrt"
-    # Disable kernel module (we use mainline)
-    "-DXDNA_BUILD_DRIVER=OFF"
+    "-DXRT_VERSION_STRING=${pluginVersion}"
+    # Point to XRT installation for libraries
+    "-DXRT_INSTALL_DIR=${xrt}/opt/xilinx/xrt"
+    # Point to XRT source for internal headers
+    "-DXRT_SOURCE_DIR=${xrtSrc}/src"
   ];
 
   postPatch = ''
-    # Remove CPACK definitions that cause issues
-    find . -name "CMakeLists.txt" -exec sed -i '/CPACK/d' {} \; || true
-
-    # Remove kernel module build references
-    find . -name "CMakeLists.txt" -exec sed -i '/driver\/amdxdna/d' {} \; || true
-
     # Disable Werror
     find . -name "CMakeLists.txt" -exec sed -i 's/-Werror//g' {} \; || true
+
+    # Fix firmware path (we don't install firmware, kernel provides it)
+    sed -i 's|/usr/lib/firmware/amdnpu|${placeholder "out"}/share/firmware/amdnpu|g' CMakeLists.txt || true
+
+    # Remove the testing install commands for XRT targets (they don't exist in upstream mode)
+    # These are only needed for the native build testing, not for the plugin itself
+    sed -i '/install(TARGETS.*XRT_CORE_TARGET/d' src/shim/CMakeLists.txt
+    sed -i '/install(TARGETS.*XRT_COREUTIL_TARGET/d' src/shim/CMakeLists.txt
+
+    # Also remove the install of xdna target to test dir (not needed)
+    sed -i '/install(TARGETS.*XDNA_TARGET.*DESTINATION.*XDNA_BIN_DIR/d' src/shim/CMakeLists.txt
+
+    # Create a wrapper CMakeLists.txt that defines IMPORTED targets for XRT
+    cat > CMakeLists.txt << 'CMAKEOF'
+cmake_minimum_required(VERSION 3.18)
+project(xrt-plugin-amdxdna)
+
+# XRT upstream mode
+set(XRT_UPSTREAM ON)
+
+# Create IMPORTED targets for XRT libraries
+add_library(xrt_core SHARED IMPORTED)
+set_target_properties(xrt_core PROPERTIES
+  IMPORTED_LOCATION "''${XRT_INSTALL_DIR}/lib/libxrt_core.so"
+  INTERFACE_INCLUDE_DIRECTORIES "''${XRT_INSTALL_DIR}/include"
+)
+
+add_library(xrt_coreutil SHARED IMPORTED)
+set_target_properties(xrt_coreutil PROPERTIES
+  IMPORTED_LOCATION "''${XRT_INSTALL_DIR}/lib/libxrt_coreutil.so"
+  INTERFACE_INCLUDE_DIRECTORIES "''${XRT_INSTALL_DIR}/include"
+)
+
+# Create gen directory for version.h
+file(MAKE_DIRECTORY ''${CMAKE_BINARY_DIR}/gen)
+
+# Create version.h stub
+file(WRITE ''${CMAKE_BINARY_DIR}/gen/version.h
+"#pragma once
+#define XRT_VERSION \"''${XRT_VERSION_STRING}\"
+#define XRT_VERSION_MAJOR 2
+#define XRT_VERSION_MINOR 21
+#define XRT_VERSION_PATCH 0
+")
+
+# Set XRT_BINARY_DIR for gen includes
+set(XRT_BINARY_DIR ''${CMAKE_BINARY_DIR})
+
+# Plugin version
+set(XRT_PLUGIN_VERSION_STRING ''${XRT_VERSION_STRING})
+set(XRT_SOVERSION 2)
+
+# Package installation directories
+set(XDNA_PKG_LIB_DIR "opt/xilinx/xrt/lib")
+set(XDNA_COMPONENT "xdna")
+set(XDNA_BIN_DIR "''${CMAKE_BINARY_DIR}/bin")
+
+add_subdirectory(src/shim)
+CMAKEOF
   '';
 
   postInstall = ''

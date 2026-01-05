@@ -25,17 +25,29 @@
           inherit xrt;
         };
 
-      in {
-        packages = {
-          inherit xrt xrt-plugin-amdxdna;
-          default = xrt-plugin-amdxdna;
+        # Combined XRT with XDNA plugin - plugins must be in same lib dir for discovery
+        xrt-amdxdna = pkgs.symlinkJoin {
+          name = "xrt-amdxdna-${xrt.version}";
+          paths = [ xrt xrt-plugin-amdxdna ];
+          postBuild = ''
+            # Ensure the plugin is discoverable by XRT
+            # XRT looks for libxrt_driver_*.so.MAJOR_VERSION in its lib dir
+            cd $out/opt/xilinx/xrt/lib
+            ln -sf ${xrt-plugin-amdxdna}/opt/xilinx/xrt/lib/libxrt_driver_xdna.so.2 . 2>/dev/null || true
+            ln -sf ${xrt-plugin-amdxdna}/opt/xilinx/xrt/lib/libxrt_driver_xdna.so.2.21.0 . 2>/dev/null || true
+          '';
         };
 
-        # Development shell with both packages
+      in {
+        packages = {
+          inherit xrt xrt-plugin-amdxdna xrt-amdxdna;
+          default = xrt-amdxdna;
+        };
+
+        # Development shell with combined package
         devShells.default = pkgs.mkShell {
           packages = [
-            xrt
-            xrt-plugin-amdxdna
+            xrt-amdxdna
           ];
 
           shellHook = ''
@@ -45,8 +57,8 @@
             echo "To verify NPU detection:"
             echo "  xrt-smi examine"
             echo ""
-            export LD_LIBRARY_PATH="${xrt}/lib:${xrt-plugin-amdxdna}/lib:$LD_LIBRARY_PATH"
-            source ${xrt}/setup.sh 2>/dev/null || true
+            export XILINX_XRT="${xrt-amdxdna}/opt/xilinx/xrt"
+            export LD_LIBRARY_PATH="${xrt-amdxdna}/opt/xilinx/xrt/lib:$LD_LIBRARY_PATH"
           '';
         };
       }
@@ -71,15 +83,14 @@
               SUBSYSTEM=="accel", KERNEL=="accel[0-9]*", GROUP="video", MODE="0660"
             '';
 
-            # Add XRT and plugin to system packages
+            # Add combined XRT+plugin to system packages
             environment.systemPackages = [
-              self.packages.${pkgs.system}.xrt
-              self.packages.${pkgs.system}.xrt-plugin-amdxdna
+              self.packages.${pkgs.system}.xrt-amdxdna
             ];
 
-            # Set up library paths
+            # Set up environment for XRT
             environment.variables = {
-              XILINX_XRT = "${self.packages.${pkgs.system}.xrt}";
+              XILINX_XRT = "${self.packages.${pkgs.system}.xrt-amdxdna}/opt/xilinx/xrt";
             };
           };
         };
