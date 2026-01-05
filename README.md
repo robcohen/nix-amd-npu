@@ -65,6 +65,8 @@ The module configures:
     enable = true;
     # Optional: use a different package
     package = nix-amd-npu.packages.x86_64-linux.xrt-amdxdna;
+    # Optional: change the group for device access and memlock limits (default: video)
+    group = "video";
   };
 }
 ```
@@ -88,13 +90,33 @@ If not using the NixOS module, you must manually configure memlock limits:
     nix-amd-npu.packages.x86_64-linux.xrt-amdxdna
   ];
 
-  # Required for NPU buffer allocation
+  boot.kernelModules = [ "amdxdna" ];
+
+  # Allow video group to access NPU device
+  services.udev.extraRules = ''
+    SUBSYSTEM=="accel", KERNEL=="accel[0-9]*", GROUP="video", MODE="0660"
+  '';
+
+  # Required for NPU buffer allocation (only for video group members)
   security.pam.loginLimits = [
-    { domain = "*"; type = "soft"; item = "memlock"; value = "unlimited"; }
-    { domain = "*"; type = "hard"; item = "memlock"; value = "unlimited"; }
+    { domain = "@video"; type = "soft"; item = "memlock"; value = "unlimited"; }
+    { domain = "@video"; type = "hard"; item = "memlock"; value = "unlimited"; }
   ];
 
   environment.variables.XILINX_XRT = "${nix-amd-npu.packages.x86_64-linux.xrt-amdxdna}/opt/xilinx/xrt";
+}
+```
+
+### Using the Overlay
+
+For more control, you can apply the overlay directly:
+
+```nix
+{
+  nixpkgs.overlays = [ nix-amd-npu.overlays.default ];
+
+  # Then use pkgs.xrt, pkgs.xrt-plugin-amdxdna, or pkgs.xrt-amdxdna
+  environment.systemPackages = [ pkgs.xrt-amdxdna ];
 }
 ```
 
@@ -119,12 +141,38 @@ nix flake check
 nix-amd-npu/
 ├── flake.nix                      # Main flake (uses flake-parts)
 ├── parts/
-│   ├── packages.nix               # Package definitions
+│   ├── packages.nix               # Package definitions + integration tests
 │   ├── devshell.nix               # Development shell
-│   └── nixos-module.nix           # NixOS module
+│   └── nixos-module.nix           # NixOS module (nixpkgs-compatible)
 └── pkgs/
-    ├── xrt/default.nix            # XRT package
-    └── xrt-plugin-amdxdna/default.nix  # XDNA plugin
+    ├── xrt/default.nix            # XRT package (nixpkgs-style)
+    └── xrt-plugin-amdxdna/default.nix  # XDNA plugin (nixpkgs-style)
+```
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| `packages.x86_64-linux.xrt` | Xilinx Runtime |
+| `packages.x86_64-linux.xrt-plugin-amdxdna` | AMD XDNA plugin |
+| `packages.x86_64-linux.xrt-amdxdna` | Combined package (default) |
+| `overlays.default` | Nixpkgs overlay adding `pkgs.xrt`, `pkgs.xrt-plugin-amdxdna`, `pkgs.xrt-amdxdna` |
+| `nixosModules.amd-npu` | NixOS hardware module |
+| `checks.x86_64-linux.*` | Integration tests |
+
+## Contributing to nixpkgs
+
+This flake is structured for easy upstreaming to nixpkgs:
+
+1. **Packages** in `pkgs/` are standalone nixpkgs-style derivations
+2. **Module** in `parts/nixos-module.nix` uses `pkgs.*` with flake fallback
+3. **No flake-specific code** in package definitions
+
+To upstream:
+```
+pkgs/xrt/default.nix              → pkgs/by-name/xr/xrt/package.nix
+pkgs/xrt-plugin-amdxdna/          → pkgs/by-name/xr/xrt-plugin-amdxdna/package.nix
+parts/nixos-module.nix            → nixos/modules/hardware/amd-npu.nix
 ```
 
 ## Troubleshooting

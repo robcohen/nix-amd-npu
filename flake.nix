@@ -16,11 +16,30 @@
         ./parts/nixos-module.nix
       ];
 
+      # Overlay for nixpkgs compatibility - allows `pkgs.xrt` when applied
+      flake.overlays.default = final: prev: {
+        xrt = final.callPackage ./pkgs/xrt {
+          pybind11 = final.python3Packages.pybind11;
+        };
+        xrt-plugin-amdxdna = final.callPackage ./pkgs/xrt-plugin-amdxdna {
+          inherit (final) xrt;
+        };
+        xrt-amdxdna = final.symlinkJoin {
+          name = "xrt-amdxdna-${final.xrt.version}";
+          paths = [ final.xrt final.xrt-plugin-amdxdna ];
+          postBuild = ''
+            cd $out/opt/xilinx/xrt/lib
+            pluginLib="${final.xrt-plugin-amdxdna}/opt/xilinx/xrt/lib"
+            ln -sf "$pluginLib/libxrt_driver_xdna.so.2" .
+            ln -sf "$pluginLib/libxrt_driver_xdna.so.${final.xrt-plugin-amdxdna.pluginVersion}" .
+          '';
+        };
+      };
+
       perSystem = { system, ... }: {
-        # Allow unfree packages (XRT has some unfree components)
         _module.args.pkgs = import nixpkgs {
           inherit system;
-          config.allowUnfree = true;
+          # Note: XRT is Apache-2.0 licensed, no unfree components required
         };
       };
     };

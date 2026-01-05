@@ -16,11 +16,14 @@
 }:
 
 let
+  # Must match XRT version for ABI compatibility
+  xrtVersion = "202610.2.21.21";
+
   # Fetch XRT source for internal headers
   xrtSrc = fetchFromGitHub {
     owner = "Xilinx";
     repo = "XRT";
-    rev = "202610.2.21.21";
+    rev = xrtVersion;
     hash = "sha256-Foj33/U6waL81EzJ0ah66xCXEGWEkvhwmurKobfCevE=";
     fetchSubmodules = true;
   };
@@ -28,7 +31,7 @@ in
 
 stdenv.mkDerivation rec {
   pname = "xrt-plugin-amdxdna";
-  version = "202610.2.21.21";
+  version = xrtVersion;
   pluginVersion = "2.21.0";
 
   src = fetchFromGitHub {
@@ -168,6 +171,7 @@ CMAKEOF
     homepage = "https://github.com/amd/xdna-driver";
     license = licenses.asl20;
     platforms = [ "x86_64-linux" ];
+    # For nixpkgs: maintainers = with maintainers; [ robcohen ];
     maintainers = [ ];
   };
 }

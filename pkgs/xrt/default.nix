@@ -203,25 +203,8 @@ STUBCMAKE
     ls -la src/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py
   '';
 
-  # Create the stub file in build dir before install runs the spec tool
-  preInstall = ''
-    echo "=== preInstall: Creating markdown_graphviz_svg.py stub ==="
-    # The spec_tool.py sets PYTHONPATH to the build specification directory
-    # We need to create the stub there for the import to work
-    mkdir -p build/runtime_src/core/common/aiebu/specification
-    cat > build/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py << 'PYEOF'
-# Stub implementation of markdown_graphviz_svg for Nix build
-from markdown.extensions import Extension
-class GraphvizBlocksExtension(Extension):
-    def extendMarkdown(self, md):
-        pass
-GraphvizExtension = GraphvizBlocksExtension
-def makeExtension(**kwargs):
-    return GraphvizBlocksExtension(**kwargs)
-PYEOF
-    echo "Created: build/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py"
-    ls -la build/runtime_src/core/common/aiebu/specification/
-  '';
+  # Note: markdown_graphviz_svg.py stub is created once in postPatch.
+  # The preInstall stub was removed as spec generation is disabled via CMakeLists.txt stub.
 
   postInstall = ''
     # Create convenience symlinks at top level
@@ -261,6 +244,7 @@ PYEOF
     homepage = "https://github.com/Xilinx/XRT";
     license = licenses.asl20;
     platforms = [ "x86_64-linux" ];
+    # For nixpkgs: maintainers = with maintainers; [ robcohen ];
     maintainers = [ ];
   };
 }
