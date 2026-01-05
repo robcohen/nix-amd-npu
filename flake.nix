@@ -83,6 +83,13 @@
               SUBSYSTEM=="accel", KERNEL=="accel[0-9]*", GROUP="video", MODE="0660"
             '';
 
+            # Increase locked memory limit for NPU buffer allocation
+            # The NPU driver needs to mmap large buffers (64MB+)
+            security.pam.loginLimits = [
+              { domain = "*"; type = "soft"; item = "memlock"; value = "unlimited"; }
+              { domain = "*"; type = "hard"; item = "memlock"; value = "unlimited"; }
+            ];
+
             # Add combined XRT+plugin to system packages
             environment.systemPackages = [
               self.packages.${pkgs.system}.xrt-amdxdna
