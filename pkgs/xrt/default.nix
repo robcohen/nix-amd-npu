@@ -39,12 +39,20 @@ stdenv.mkDerivation rec {
     fetchSubmodules = true;
   };
 
+  # Python with packages needed by spec_tool.py during build
+  pythonWithPackages = python3.withPackages (ps: [
+    ps.pyyaml
+    ps.markdown
+    ps.jinja2
+    ps.pybind11
+  ]);
+
   nativeBuildInputs = [
     cmake
     ninja
     pkg-config
     git
-    python3
+    pythonWithPackages
     wget
   ];
 
@@ -76,8 +84,15 @@ stdenv.mkDerivation rec {
     "-DDISABLE_WERROR=ON"
     # Disable kernel module building (we use mainline amdxdna)
     "-DXRT_DKMS_DRIVER_SRC_BASE_DIR="
-    # Disable static linking for aiebu tools
-    "-DAIEBU_STATIC_BUILD=OFF"
+    # XRT_UPSTREAM_DEBIAN enables XRT_UPSTREAM which propagates to AIEBU_UPSTREAM
+    # This disables static linking in aiebu tools
+    # See: src/CMake/settings.cmake lines 19-21
+    "-DXRT_UPSTREAM_DEBIAN=ON"
+    # Override install dirs to relative paths to prevent aiebu cmake path issues
+    # aiebu concatenates CMAKE_BINARY_DIR + CMAKE_INSTALL_LIBDIR which breaks with absolute paths
+    "-DCMAKE_INSTALL_LIBDIR=lib"
+    "-DCMAKE_INSTALL_BINDIR=bin"
+    "-DCMAKE_INSTALL_INCLUDEDIR=include"
   ];
 
   # Skip building kernel modules and fix Nix-specific issues
@@ -86,54 +101,126 @@ stdenv.mkDerivation rec {
     substituteInPlace src/CMakeLists.txt \
       --replace-quiet 'add_subdirectory(runtime_src/core/pcie/driver)' '#add_subdirectory(runtime_src/core/pcie/driver)' || true
 
+    # Fix hardcoded /usr/src DKMS install path
+    # Redirect to $out/share/xrt-dkms-src instead of /usr/src
+    for f in src/CMake/version.cmake src/CMake/dkms.cmake src/CMake/dkms-edge.cmake; do
+      if [ -f "$f" ]; then
+        sed -i 's|/usr/src/xrt-|''${CMAKE_INSTALL_PREFIX}/share/xrt-dkms-src/xrt-|g' "$f"
+      fi
+    done
+    if [ -f src/CMake/dkms-aws.cmake ]; then
+      sed -i 's|/usr/src/xrt-aws-|''${CMAKE_INSTALL_PREFIX}/share/xrt-dkms-src/xrt-aws-|g' src/CMake/dkms-aws.cmake
+    fi
+
+    # Fix hardcoded /usr/local/bin install paths for xbflash tools
+    for f in src/runtime_src/core/tools/xbflash2/CMakeLists.txt src/runtime_src/core/pcie/tools/xbflash.qspi/CMakeLists.txt; do
+      if [ -f "$f" ]; then
+        sed -i 's|"/usr/local/bin"|"''${CMAKE_INSTALL_PREFIX}/bin"|g' "$f"
+      fi
+    done
+
+    # Fix /etc/OpenCL/vendors path for OpenCL ICD registration
+    if [ -f src/CMake/icd.cmake ]; then
+      sed -i 's|/etc/OpenCL/vendors|''${CMAKE_INSTALL_PREFIX}/etc/OpenCL/vendors|g' src/CMake/icd.cmake
+    fi
+
     # Fix hardcoded paths
     substituteInPlace src/runtime_src/core/common/config_reader.cpp \
       --replace-quiet '/opt/xilinx/xrt' '${placeholder "out"}/opt/xilinx/xrt' || true
 
     # Fix /etc/os-release access - create a fake one for the build
     mkdir -p $TMPDIR/etc
-    cat > $TMPDIR/etc/os-release << EOF2
-    ID=nixos
-    VERSION_ID="25.11"
-    EOF2
+    echo 'ID=nixos' > $TMPDIR/etc/os-release
+    echo 'VERSION_ID="25.11"' >> $TMPDIR/etc/os-release
 
     # Patch CMake scripts that try to read /etc/os-release
     find . -name "*.cmake" -o -name "CMakeLists.txt" | xargs sed -i \
       -e 's|/etc/os-release|'$TMPDIR'/etc/os-release|g' || true
 
-    # Disable Werror
+    # Disable Werror globally
     find . -name "CMakeLists.txt" -exec sed -i 's/-Werror//g' {} \; || true
 
-    # Remove static linking flags that cause issues on Nix
-    find . -name "CMakeLists.txt" -exec sed -i 's/-static//g' {} \; || true
-    find . -name "*.cmake" -exec sed -i 's/-static//g' {} \; || true
+    # Note: XRT_UPSTREAM_DEBIAN=ON sets AIEBU_UPSTREAM which disables static linking
+    # via "if (NOT AIEBU_UPSTREAM)" guards in the CMake files
 
-    # Also remove STATIC_LINK variable usage and set_target_properties LINK_FLAGS -static
-    find . -name "CMakeLists.txt" -exec sed -i 's/STATIC_LINK/-DSTATIC_DISABLED/g' {} \; || true
-    find . -name "CMakeLists.txt" -exec sed -i 's/set_target_properties.*LINK_FLAGS.*-static.*)/# Disabled for Nix/g' {} \; || true
-
-    # Completely remove the aiebu utils directory (contains statically linked tools)
-    rm -rf src/runtime_src/core/common/aiebu/src/cpp/utils || true
-
-    # Also patch any CMakeLists that reference utils
-    find . -path "*/aiebu/*" -name "CMakeLists.txt" -exec sed -i \
-      -e 's|add_subdirectory(utils)|#add_subdirectory(utils)|g' \
-      {} \; || true
-
-    # Disable the dynamic dependency checker (fails because we use dynamic linking)
-    if [ -f src/runtime_src/core/common/aiebu/cmake/depends.cmake ]; then
-      echo "# Disabled for Nix build" > src/runtime_src/core/common/aiebu/cmake/depends.cmake
-    fi
-
-    # Create the markdown_graphviz_svg.py file to avoid network fetch during install
-    mkdir -p src/runtime_src/core/common/aiebu/specification
+    # Create stub markdown_graphviz_svg.py module to avoid network download
+    # The spec_tool.py imports this as a markdown extension
+    # The spec_tool uses GraphvizBlocksExtension() for HTML doc generation
     cat > src/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py << 'PYEOF'
-# Stub file - actual content not needed for runtime
-pass
+# Stub implementation of markdown_graphviz_svg for Nix build
+# The real module is https://github.com/Tanami/markdown-graphviz-svg
+# This stub provides minimal interface to avoid import errors
+
+from markdown.extensions import Extension
+
+class GraphvizBlocksExtension(Extension):
+    """Stub extension - graphviz rendering is disabled in Nix build"""
+    def extendMarkdown(self, md):
+        pass
+
+# Also provide the original class names for compatibility
+GraphvizExtension = GraphvizBlocksExtension
+
+def makeExtension(**kwargs):
+    return GraphvizBlocksExtension(**kwargs)
 PYEOF
 
-    # Patch out wget download during install
-    find . -name "CMakeLists.txt" -exec sed -i 's/wget.*markdown_graphviz_svg.py/true/g' {} \; || true
+    # Replace wget command in specification CMakeLists.txt
+    # The wget downloads a Python module - we use our stub instead
+    # The command is split across multiple lines, so just replace 'wget' with 'true #'
+    find . -name "CMakeLists.txt" -exec grep -l "wget" {} \; | while read f; do
+      echo "Patching wget out of: $f"
+      # Replace wget with true - this disables the network download
+      # The stub file is pre-created in preInstall phase
+      sed -i 's|COMMAND wget|COMMAND true # wget|g' "$f"
+      sed -i 's|COMMAND powershell wget|COMMAND true # powershell wget|g' "$f"
+    done
+
+    # Disable the spec generation targets during install
+    # The build phase generates these files correctly, but install-time regeneration
+    # with spec_tool.py produces incomplete output (no disassembler code)
+    # Replace entire add_custom_target blocks with empty targets
+    specCmake="src/runtime_src/core/common/aiebu/specification/aie2ps/CMakeLists.txt"
+    if [ -f "$specCmake" ]; then
+      echo "Disabling spec generation in $specCmake"
+      # Create empty stub CMakeLists that does nothing
+      cat > "$specCmake" << 'STUBCMAKE'
+# SPDX-License-Identifier: MIT
+# Disabled for Nix build - spec generation causes issues
+# The ISA headers are generated during build phase
+message(STATUS "Skipping aie2ps spec generation (Nix build)")
+STUBCMAKE
+    fi
+
+    # Fix spec_tool.py shebang issue - the script uses #!/usr/bin/env python3
+    # which doesn't work in Nix sandbox (no /usr/bin/env)
+    # Use patchShebangs to fix all Python scripts to use the Nix Python
+    patchShebangs --build src/runtime_src/core/common/aiebu/specification/
+    patchShebangs --build src/runtime_src/core/common/aiebu/src/python/ || true
+
+    # Verify the stub exists where aiebu expects it
+    echo "Created stub at: src/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py"
+    ls -la src/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py
+  '';
+
+  # Create the stub file in build dir before install runs the spec tool
+  preInstall = ''
+    echo "=== preInstall: Creating markdown_graphviz_svg.py stub ==="
+    # The spec_tool.py sets PYTHONPATH to the build specification directory
+    # We need to create the stub there for the import to work
+    mkdir -p build/runtime_src/core/common/aiebu/specification
+    cat > build/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py << 'PYEOF'
+# Stub implementation of markdown_graphviz_svg for Nix build
+from markdown.extensions import Extension
+class GraphvizBlocksExtension(Extension):
+    def extendMarkdown(self, md):
+        pass
+GraphvizExtension = GraphvizBlocksExtension
+def makeExtension(**kwargs):
+    return GraphvizBlocksExtension(**kwargs)
+PYEOF
+    echo "Created: build/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py"
+    ls -la build/runtime_src/core/common/aiebu/specification/
   '';
 
   postInstall = ''
