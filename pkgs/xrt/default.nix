@@ -5,7 +5,7 @@
 , ninja
 , pkg-config
 , git
-, python3
+, python312  # Use Python 3.12 to match mlir_aie wheel
 , boost
 , opencl-headers
 , opencl-clhpp
@@ -19,7 +19,6 @@
 , openssl
 , libuuid
 , libxcrypt
-, pybind11
 , ncurses
 , gawk
 , libsystemtap
@@ -40,7 +39,8 @@ stdenv.mkDerivation rec {
   };
 
   # Python with packages needed by spec_tool.py during build
-  pythonWithPackages = python3.withPackages (ps: [
+  # Use Python 3.12 to match mlir_aie wheel in iron-fhs environment
+  pythonWithPackages = python312.withPackages (ps: [
     ps.pyyaml
     ps.markdown
     ps.jinja2
@@ -70,7 +70,8 @@ stdenv.mkDerivation rec {
     openssl
     libuuid
     libxcrypt
-    pybind11
+    # pybind11 is provided via pythonWithPackages - don't add separately
+    # (pybind11 from nativeBuildInputs would conflict with different Python version)
     ncurses
     libsystemtap
   ];
@@ -93,10 +94,21 @@ stdenv.mkDerivation rec {
     "-DCMAKE_INSTALL_LIBDIR=lib"
     "-DCMAKE_INSTALL_BINDIR=bin"
     "-DCMAKE_INSTALL_INCLUDEDIR=include"
+    # Enable Python bindings (pyxrt) for IRON/mlir-aie integration
+    "-DXRT_ENABLE_PYXRT=ON"
+    "-DPython3_EXECUTABLE=${pythonWithPackages}/bin/python3"
+    "-DPython3_INCLUDE_DIR=${pythonWithPackages}/include/python3.12"
+    "-DPython3_LIBRARY=${pythonWithPackages}/lib/libpython3.12.so"
+    "-DPYTHON_EXECUTABLE=${pythonWithPackages}/bin/python3"
   ];
 
   # Skip building kernel modules and fix Nix-specific issues
   postPatch = ''
+    # Fix Python3 detection for pybind11/pyxrt build
+    # The cmake tries to run /usr/bin/python3 which doesn't exist in Nix sandbox
+    substituteInPlace src/python/pybind11/CMakeLists.txt \
+      --replace-quiet '/usr/bin/python3' "${pythonWithPackages}/bin/python3" || true
+
     # Remove kernel module references
     substituteInPlace src/CMakeLists.txt \
       --replace-quiet 'add_subdirectory(runtime_src/core/pcie/driver)' '#add_subdirectory(runtime_src/core/pcie/driver)' || true

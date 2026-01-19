@@ -18,9 +18,8 @@
 
       # Overlay for nixpkgs compatibility - allows `pkgs.xrt` when applied
       flake.overlays.default = final: prev: {
-        xrt = final.callPackage ./pkgs/xrt {
-          pybind11 = final.python3Packages.pybind11;
-        };
+        # XRT and XDNA driver
+        xrt = final.callPackage ./pkgs/xrt { };
         xrt-plugin-amdxdna = final.callPackage ./pkgs/xrt-plugin-amdxdna {
           inherit (final) xrt;
         };
@@ -33,6 +32,41 @@
             ln -sf "$pluginLib/libxrt_driver_xdna.so.2" .
             ln -sf "$pluginLib/libxrt_driver_xdna.so.${final.xrt-plugin-amdxdna.pluginVersion}" .
           '';
+        };
+
+        # Vitis AI libraries
+        unilog = final.callPackage ./pkgs/vitis-ai/unilog { };
+        xir = final.callPackage ./pkgs/vitis-ai/xir {
+          inherit (final) unilog;
+        };
+        target-factory = final.callPackage ./pkgs/vitis-ai/target-factory {
+          inherit (final) unilog xir;
+        };
+        vart = final.callPackage ./pkgs/vitis-ai/vart {
+          inherit (final) unilog xir target-factory;
+          xrt = null;
+        };
+        trace-logging = final.callPackage ./pkgs/vitis-ai/trace-logging { };
+        graph-engine = final.callPackage ./pkgs/vitis-ai/graph-engine {
+          inherit (final) unilog xir vart xrt;
+        };
+        xaiengine = final.callPackage ./pkgs/vitis-ai/xaiengine { };
+        dynamic-dispatch = final.callPackage ./pkgs/vitis-ai/dynamic-dispatch {
+          inherit (final) xaiengine xrt;
+        };
+
+        # ONNX Runtime with VitisAI EP
+        onnxruntime-vitisai = final.callPackage ./pkgs/onnxruntime-vitisai {
+          inherit (final) xrt;
+          inherit (prev) onnxruntime;
+        };
+
+        # MLIR-AIE for NPU kernel development
+        mlir-aie = final.callPackage ./pkgs/mlir-aie { };
+
+        # Whisper-IRON speech recognition
+        whisper-iron = final.callPackage ./pkgs/whisper-iron {
+          inherit (final) mlir-aie xrt-amdxdna;
         };
       };
 

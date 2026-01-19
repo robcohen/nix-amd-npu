@@ -1,0 +1,75 @@
+name: Bug Report
+description: Report a bug or issue with nix-amd-npu
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the sections below.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of what the bug is.
+      placeholder: Describe what happened...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Run `nix develop`
+        2. Execute `xrt-smi examine`
+        3. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Please provide the following information.
+      value: |
+        - NixOS/Nix version:
+        - Kernel version (`uname -r`):
+        - CPU model:
+        - NPU detected (`ls /dev/accel/`):
+        - XRT version (if applicable):
+    validations:
+      required: true
+
+  - type: textarea
+    id: xrt-output
+    attributes:
+      label: XRT SMI Output
+      description: If applicable, paste the output of `xrt-smi examine`
+      render: shell
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Any error messages or logs.
+      render: shell
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues for duplicates
+          required: true
+        - label: I am using a supported AMD Ryzen AI processor
+          required: false

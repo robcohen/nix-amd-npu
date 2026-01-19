@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  check-flake:
+    name: Check Nix Flake
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Check flake
+        run: nix flake check --no-build
+
+      - name: Show flake info
+        run: nix flake show
+
+  build-packages:
+    name: Build Packages
+    runs-on: ubuntu-latest
+    needs: check-flake
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - xrt
+          - xrt-plugin-amdxdna
+          - unilog
+          - xir
+          - target-factory
+          - vart
+          - trace-logging
+          - xaiengine
+          - dynamic-dispatch
+          # Note: These packages have large dependencies and may timeout
+          # - graph-engine
+          # - onnxruntime-vitisai
+          # - mlir-aie
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: nix-amd-npu
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        continue-on-error: true
+
+      - name: Build ${{ matrix.package }}
+        run: nix build .#${{ matrix.package }} --print-build-logs
+
+  build-xrt-combined:
+    name: Build XRT Combined Package
+    runs-on: ubuntu-latest
+    needs: build-packages
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: nix-amd-npu
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        continue-on-error: true
+
+      - name: Build xrt-amdxdna (combined)
+        run: nix build .#xrt-amdxdna --print-build-logs
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: build-xrt-combined
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: nix-amd-npu
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        continue-on-error: true
+
+      - name: Run integration tests
+        run: |
+          nix build .#checks.x86_64-linux.xrt-binaries --print-build-logs
+          nix build .#checks.x86_64-linux.plugin-library --print-build-logs
+          nix build .#checks.x86_64-linux.plugin-discovery --print-build-logs
+          nix build .#checks.x86_64-linux.pkg-config-files --print-build-logs
+          nix build .#checks.x86_64-linux.environment-setup --print-build-logs
+
+  nixos-module-eval:
+    name: NixOS Module Evaluation
+    runs-on: ubuntu-latest
+    needs: check-flake
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Evaluate NixOS module
+        run: |
+          nix eval --json '.#nixosModules' | jq .
+          echo "NixOS module evaluation successful"
+
+  formatting:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Check Nix formatting
+        run: |
+          nix run nixpkgs#nixfmt-rfc-style -- --check flake.nix parts/*.nix lib/*.nix || {
+            echo "::warning::Nix files are not formatted. Run: nix run nixpkgs#nixfmt-rfc-style -- flake.nix parts/*.nix lib/*.nix"
+            exit 0  # Don't fail on formatting for now
+          }

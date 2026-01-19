@@ -2,9 +2,7 @@
 {
   perSystem = { config, pkgs, system, ... }:
     let
-      xrt = pkgs.callPackage ../pkgs/xrt {
-        pybind11 = pkgs.python3Packages.pybind11;
-      };
+      xrt = pkgs.callPackage ../pkgs/xrt { };
 
       xrt-plugin-amdxdna = pkgs.callPackage ../pkgs/xrt-plugin-amdxdna {
         inherit xrt;
@@ -29,11 +27,78 @@
           ln -sf "$pluginLib/libxrt_driver_xdna.so.${xrt-plugin-amdxdna.pluginVersion}" .
         '';
       };
+
+      # Vitis AI components
+      unilog = pkgs.callPackage ../pkgs/vitis-ai/unilog { };
+
+      xir = pkgs.callPackage ../pkgs/vitis-ai/xir {
+        inherit unilog;
+      };
+
+      target-factory = pkgs.callPackage ../pkgs/vitis-ai/target-factory {
+        inherit unilog xir;
+      };
+
+      vart = pkgs.callPackage ../pkgs/vitis-ai/vart {
+        inherit unilog xir target-factory;
+        xrt = null;  # XRT is optional for vart
+      };
+
+      trace-logging = pkgs.callPackage ../pkgs/vitis-ai/trace-logging { };
+
+      graph-engine = pkgs.callPackage ../pkgs/vitis-ai/graph-engine {
+        inherit unilog xir vart xrt;
+      };
+
+      xaiengine = pkgs.callPackage ../pkgs/vitis-ai/xaiengine { };
+
+      dynamic-dispatch = pkgs.callPackage ../pkgs/vitis-ai/dynamic-dispatch {
+        inherit xaiengine xrt;
+      };
+
+      # ONNX Runtime with VitisAI EP (C++ library)
+      onnxruntime-vitisai = pkgs.callPackage ../pkgs/onnxruntime-vitisai {
+        inherit xrt;
+        inherit (pkgs) onnxruntime;
+      };
+
+      # Python bindings for ONNX Runtime with VitisAI EP
+      python-onnxruntime-vitisai = pkgs.callPackage ../pkgs/python-onnxruntime-vitisai {
+        inherit onnxruntime-vitisai xrt;
+        inherit (pkgs) python3Packages;
+      };
+
+      # AMD pre-built components (unfree, requires manual download)
+      ryzen-ai-software = pkgs.callPackage ../pkgs/ryzen-ai-software {
+        inherit xrt;
+      };
+
+      ryzen-ai-xclbin = pkgs.callPackage ../pkgs/ryzen-ai-xclbin { };
+
+      # MLIR-AIE for NPU kernel development
+      mlir-aie = pkgs.callPackage ../pkgs/mlir-aie { };
+
+      # Whisper-IRON speech recognition demo
+      whisper-iron = pkgs.callPackage ../pkgs/whisper-iron {
+        inherit mlir-aie xrt-amdxdna;
+      };
+
+      # Complete Ryzen AI stack (combines from-source + pre-built)
+      ryzen-ai-full = pkgs.callPackage ../pkgs/ryzen-ai-full {
+        inherit xrt xrt-amdxdna onnxruntime-vitisai dynamic-dispatch
+                unilog xir vart graph-engine;
+      };
     in
     {
       packages = {
-        inherit xrt xrt-plugin-amdxdna xrt-amdxdna;
+        # Free/open-source packages (built from source)
+        inherit xrt xrt-plugin-amdxdna xrt-amdxdna unilog xir target-factory vart trace-logging graph-engine xaiengine dynamic-dispatch onnxruntime-vitisai python-onnxruntime-vitisai mlir-aie whisper-iron;
         default = xrt-amdxdna;
+      };
+
+      # Unfree packages available via legacyPackages (requires NIXPKGS_ALLOW_UNFREE=1)
+      legacyPackages = {
+        inherit ryzen-ai-software ryzen-ai-xclbin ryzen-ai-full;
       };
 
       # Integration tests - run with `nix flake check`
@@ -41,8 +106,8 @@
         # Verify XRT builds and has expected binaries
         xrt-binaries = pkgs.runCommand "check-xrt-binaries" {} ''
           echo "Checking XRT binaries..."
-          test -x ${xrt}/bin/xrt-smi || (echo "FAIL: xrt-smi not found" && exit 1)
-          test -x ${xrt}/bin/xbutil || (echo "FAIL: xbutil not found" && exit 1)
+          test -x ${xrt}/bin/unwrapped/xrt-smi || (echo "FAIL: xrt-smi not found" && exit 1)
+          test -x ${xrt}/bin/unwrapped/xclbinutil || (echo "FAIL: xclbinutil not found" && exit 1)
           echo "PASS: XRT binaries present"
           touch $out
         '';

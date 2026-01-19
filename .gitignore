@@ -1,4 +1,76 @@
+# Nix build artifacts
 result
 result-*
-.direnv
+
+# direnv
+.direnv/
 .envrc
+.envrc.local
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/build/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+ENV/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Audio test files (whisper-iron)
+*.wav
+*.mp3
+*.flac
+*.ogg
+
+# Model weights and caches
+*.pt
+*.pth
+*.bin
+*.safetensors
+.cache/
+huggingface/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
