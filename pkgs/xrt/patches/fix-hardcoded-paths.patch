@@ -1,0 +1,91 @@
+diff --git a/src/CMake/dkms.cmake b/src/CMake/dkms.cmake
+index 711c4d0..517d36d 100644
+--- a/src/CMake/dkms.cmake
++++ b/src/CMake/dkms.cmake
+@@ -7,7 +7,7 @@
+ # LINUX_KERNEL_VERSION
+
+ if (NOT DEFINED XRT_DKMS_INSTALL_DIR)
+-  set (XRT_DKMS_INSTALL_DIR "/usr/src/xrt-${XRT_VERSION_STRING}")
++  set (XRT_DKMS_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/share/xrt-dkms-src/xrt-${XRT_VERSION_STRING}")
+ endif()
+ set (XRT_DKMS_INSTALL_DRIVER_DIR "${XRT_DKMS_INSTALL_DIR}/driver")
+
+diff --git a/src/CMake/dkms-edge.cmake b/src/CMake/dkms-edge.cmake
+index 01e904a..fac4e7c 100644
+--- a/src/CMake/dkms-edge.cmake
++++ b/src/CMake/dkms-edge.cmake
+@@ -4,7 +4,7 @@
+ # Custom variables imported by this CMake stub which should be defined by parent CMake:
+ # XRT_DKMS_DRIVER_SRC_BASE_DIR
+
+-set (XRT_DKMS_INSTALL_DIR "/usr/src/xrt-${XRT_VERSION_STRING}")
++set (XRT_DKMS_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/share/xrt-dkms-src/xrt-${XRT_VERSION_STRING}")
+ set (XRT_DKMS_INSTALL_DRIVER_DIR "${XRT_DKMS_INSTALL_DIR}/driver")
+
+ message("-- XRT DRIVER SRC BASE DIR ${XRT_DKMS_DRIVER_SRC_BASE_DIR}")
+diff --git a/src/CMake/dkms-aws.cmake b/src/CMake/dkms-aws.cmake
+index eb18fe3..c2274c3 100644
+--- a/src/CMake/dkms-aws.cmake
++++ b/src/CMake/dkms-aws.cmake
+@@ -6,7 +6,7 @@
+ # XRT_VERSION_STRING
+ # LINUX_KERNEL_VERSION
+
+-set(XRT_DKMS_AWS_INSTALL_DIR "/usr/src/xrt-aws-${XRT_VERSION_STRING}")
++set(XRT_DKMS_AWS_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/share/xrt-dkms-src/xrt-aws-${XRT_VERSION_STRING}")
+ set(XRT_DKMS_AWS_INSTALL_DRIVER_DIR "${XRT_DKMS_AWS_INSTALL_DIR}/driver")
+
+ message("-- XRT DRIVER SRC BASE DIR ${XRT_DKMS_DRIVER_SRC_BASE_DIR}")
+diff --git a/src/CMake/version.cmake b/src/CMake/version.cmake
+index f986975..93efc9a 100644
+--- a/src/CMake/version.cmake
++++ b/src/CMake/version.cmake
+@@ -170,7 +170,7 @@ endif()
+ # This is not required on MPSoC platform. To avoid yocto error, do NOT intall
+ if (XRT_ALVEO AND (NOT XRT_EDGE) AND (NOT WIN32))
+   # Copied over from dkms.cmake. TODO: cleanup
+-  set (XRT_DKMS_INSTALL_DIR "/usr/src/xrt-${XRT_VERSION_STRING}")
++  set (XRT_DKMS_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/share/xrt-dkms-src/xrt-${XRT_VERSION_STRING}")
+   install(FILES
+     ${PROJECT_BINARY_DIR}/gen/xrt/detail/version.h
+     ${PROJECT_BINARY_DIR}/gen/xrt/detail/version-slim.h
+diff --git a/src/CMake/icd.cmake b/src/CMake/icd.cmake
+index c9fadde..d42e015 100644
+--- a/src/CMake/icd.cmake
++++ b/src/CMake/icd.cmake
+@@ -14,7 +14,7 @@ configure_file (
+   ${ICD_FILE_NAME}
+   )
+
+-set(OCL_ICD_INSTALL_PREFIX "/etc/OpenCL/vendors")
++set(OCL_ICD_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}/etc/OpenCL/vendors")
+
+ install (FILES ${CMAKE_CURRENT_BINARY_DIR}/${ICD_FILE_NAME}
+   DESTINATION ${OCL_ICD_INSTALL_PREFIX}
+diff --git a/src/runtime_src/core/tools/xbflash2/CMakeLists.txt b/src/runtime_src/core/tools/xbflash2/CMakeLists.txt
+index 3bc6c13..d95b964 100755
+--- a/src/runtime_src/core/tools/xbflash2/CMakeLists.txt
++++ b/src/runtime_src/core/tools/xbflash2/CMakeLists.txt
+@@ -30,7 +30,7 @@ file(GLOB XBFLASH_QSPI_FILES
+
+ set(XBFLASH_QSPI_SRC ${XBFLASH_BASE_FILES} ${XBFLASH_QSPI_FILES})
+ set(XBFLASH_NAME "xbflash2")
+-set(XBFLASH_INSTALL_DEST "/usr/local/bin")
++set(XBFLASH_INSTALL_DEST "${CMAKE_INSTALL_PREFIX}/bin")
+ set(XBFLASH_COMPONENT "xbflash2")
+
+ add_executable(${XBFLASH_NAME} ${XBFLASH_QSPI_SRC})
+diff --git a/src/runtime_src/core/pcie/tools/xbflash.qspi/CMakeLists.txt b/src/runtime_src/core/pcie/tools/xbflash.qspi/CMakeLists.txt
+index 3cf16d3..e068a16 100644
+--- a/src/runtime_src/core/pcie/tools/xbflash.qspi/CMakeLists.txt
++++ b/src/runtime_src/core/pcie/tools/xbflash.qspi/CMakeLists.txt
+@@ -15,7 +15,7 @@ file(GLOB XBFLASH_QSPI_FILES
+ set(XBFLASH_QSPI_SRC ${XBFLASH_QSPI_FILES})
+ set(XBFLASH_NAME "xbflash.qspi")
+ set(XBFLASH_NAME_NEW "xbflash")
+-set(XBFLASH_INSTALL_DEST "/usr/local/bin")
++set(XBFLASH_INSTALL_DEST "${CMAKE_INSTALL_PREFIX}/bin")
+ set(XBFLASH_COMPONENT "xbflash")
+
+ add_executable(${XBFLASH_NAME} ${XBFLASH_QSPI_SRC})

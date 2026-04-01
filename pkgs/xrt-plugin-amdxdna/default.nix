@@ -15,30 +15,27 @@
 , xrt
 }:
 
-let
-  # Must match XRT version for ABI compatibility
-  xrtVersion = "202610.2.21.21";
-
-  # Fetch XRT source for internal headers
-  xrtSrc = fetchFromGitHub {
-    owner = "Xilinx";
-    repo = "XRT";
-    rev = xrtVersion;
-    hash = "sha256-Foj33/U6waL81EzJ0ah66xCXEGWEkvhwmurKobfCevE=";
-    fetchSubmodules = true;
-  };
-in
-
-stdenv.mkDerivation rec {
+stdenv.mkDerivation (finalAttrs: {
   pname = "xrt-plugin-amdxdna";
-  version = xrtVersion;
+  version = "202610.2.21.21";
+
+  # Exported for use in symlinkJoin postBuild
   pluginVersion = "2.21.0";
 
   src = fetchFromGitHub {
     owner = "amd";
     repo = "xdna-driver";
-    rev = version;
+    rev = finalAttrs.version;
     hash = "sha256-vXA8MzY0+KNquDG7jY3pZkm6lyM+V493xRmojl+wuIw=";
+    fetchSubmodules = true;
+  };
+
+  # Fetch XRT source for internal headers (must match XRT version for ABI compatibility)
+  xrtSrc = fetchFromGitHub {
+    owner = "Xilinx";
+    repo = "XRT";
+    rev = finalAttrs.version;
+    hash = "sha256-Foj33/U6waL81EzJ0ah66xCXEGWEkvhwmurKobfCevE=";
     fetchSubmodules = true;
   };
 
@@ -64,13 +61,13 @@ stdenv.mkDerivation rec {
   cmakeDir = "..";
 
   cmakeFlags = [
-    "-DCMAKE_INSTALL_PREFIX=${placeholder "out"}"
-    "-DCMAKE_BUILD_TYPE=Release"
-    "-DXRT_VERSION_STRING=${pluginVersion}"
+    (lib.cmakeFeature "CMAKE_INSTALL_PREFIX" (placeholder "out"))
+    (lib.cmakeFeature "CMAKE_BUILD_TYPE" "Release")
+    (lib.cmakeFeature "XRT_VERSION_STRING" finalAttrs.pluginVersion)
     # Point to XRT installation for libraries
-    "-DXRT_INSTALL_DIR=${xrt}/opt/xilinx/xrt"
+    (lib.cmakeFeature "XRT_INSTALL_DIR" "${xrt}/opt/xilinx/xrt")
     # Point to XRT source for internal headers
-    "-DXRT_SOURCE_DIR=${xrtSrc}/src"
+    (lib.cmakeFeature "XRT_SOURCE_DIR" "${finalAttrs.xrtSrc}/src")
   ];
 
   postPatch = ''
@@ -81,11 +78,8 @@ stdenv.mkDerivation rec {
     sed -i 's|/usr/lib/firmware/amdnpu|${placeholder "out"}/share/firmware/amdnpu|g' CMakeLists.txt || true
 
     # Remove the testing install commands for XRT targets (they don't exist in upstream mode)
-    # These are only needed for the native build testing, not for the plugin itself
     sed -i '/install(TARGETS.*XRT_CORE_TARGET/d' src/shim/CMakeLists.txt
     sed -i '/install(TARGETS.*XRT_COREUTIL_TARGET/d' src/shim/CMakeLists.txt
-
-    # Also remove the install of xdna target to test dir (not needed)
     sed -i '/install(TARGETS.*XDNA_TARGET.*DESTINATION.*XDNA_BIN_DIR/d' src/shim/CMakeLists.txt
 
     # Create a wrapper CMakeLists.txt that defines IMPORTED targets for XRT
@@ -146,32 +140,31 @@ CMAKEOF
 
     # Create top-level symlinks
     mkdir -p $out/lib
-    for lib in $out/opt/xilinx/xrt/lib/*.so*; do
-      ln -sf $lib $out/lib/ 2>/dev/null || true
+    for f in $out/opt/xilinx/xrt/lib/*.so*; do
+      ln -sf $f $out/lib/ 2>/dev/null || true
     done
 
     # Create pkg-config file
     mkdir -p $out/lib/pkgconfig
     cat > $out/lib/pkgconfig/xrt-amdxdna.pc << EOF
-    prefix=$out/opt/xilinx/xrt
-    exec_prefix=\''${prefix}
-    libdir=\''${exec_prefix}/lib
-    includedir=\''${prefix}/include
+prefix=$out/opt/xilinx/xrt
+exec_prefix=\''${prefix}
+libdir=\''${exec_prefix}/lib
+includedir=\''${prefix}/include
 
-    Name: XRT-AMDXDNA
-    Description: AMD XDNA Plugin for Xilinx Runtime
-    Version: ${pluginVersion}
-    Requires: xrt
-    Libs: -L\''${libdir} -lamdxdna
-    EOF
+Name: XRT-AMDXDNA
+Description: AMD XDNA Plugin for Xilinx Runtime
+Version: ${finalAttrs.pluginVersion}
+Requires: xrt
+Libs: -L\''${libdir} -lamdxdna
+EOF
   '';
 
-  meta = with lib; {
+  meta = {
     description = "AMD XDNA driver plugin for XRT (Ryzen AI NPU support)";
     homepage = "https://github.com/amd/xdna-driver";
-    license = licenses.asl20;
+    license = lib.licenses.asl20;
     platforms = [ "x86_64-linux" ];
-    # For nixpkgs: maintainers = with maintainers; [ robcohen ];
     maintainers = [ ];
   };
-}
+})

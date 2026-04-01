@@ -5,7 +5,7 @@
 , ninja
 , pkg-config
 , git
-, python312  # Use Python 3.12 to match mlir_aie wheel
+, python312
 , boost
 , opencl-headers
 , opencl-clhpp
@@ -20,27 +20,28 @@
 , libuuid
 , libxcrypt
 , ncurses
-, gawk
 , libsystemtap
-, wget
-, cacert
 }:
 
-stdenv.mkDerivation rec {
+stdenv.mkDerivation (finalAttrs: {
   pname = "xrt";
   version = "202610.2.21.21";
 
   src = fetchFromGitHub {
     owner = "Xilinx";
     repo = "XRT";
-    rev = version;
+    rev = finalAttrs.version;
     hash = "sha256-Foj33/U6waL81EzJ0ah66xCXEGWEkvhwmurKobfCevE=";
     fetchSubmodules = true;
   };
 
+  patches = [
+    ./patches/fix-hardcoded-paths.patch
+  ];
+
   # Python with packages needed by spec_tool.py during build
   # Use Python 3.12 to match mlir_aie wheel in iron-fhs environment
-  pythonWithPackages = python312.withPackages (ps: [
+  pythonEnv = python312.withPackages (ps: [
     ps.pyyaml
     ps.markdown
     ps.jinja2
@@ -52,8 +53,7 @@ stdenv.mkDerivation rec {
     ninja
     pkg-config
     git
-    pythonWithPackages
-    wget
+    finalAttrs.pythonEnv
   ];
 
   buildInputs = [
@@ -70,8 +70,6 @@ stdenv.mkDerivation rec {
     openssl
     libuuid
     libxcrypt
-    # pybind11 is provided via pythonWithPackages - don't add separately
-    # (pybind11 from nativeBuildInputs would conflict with different Python version)
     ncurses
     libsystemtap
   ];
@@ -79,66 +77,35 @@ stdenv.mkDerivation rec {
   cmakeDir = "../src";
 
   cmakeFlags = [
-    "-DCMAKE_INSTALL_PREFIX=${placeholder "out"}/opt/xilinx/xrt"
-    "-DXRT_INSTALL_PREFIX=${placeholder "out"}/opt/xilinx/xrt"
-    "-DCMAKE_BUILD_TYPE=Release"
-    "-DDISABLE_WERROR=ON"
+    (lib.cmakeFeature "CMAKE_INSTALL_PREFIX" "${placeholder "out"}/opt/xilinx/xrt")
+    (lib.cmakeFeature "XRT_INSTALL_PREFIX" "${placeholder "out"}/opt/xilinx/xrt")
+    (lib.cmakeFeature "CMAKE_BUILD_TYPE" "Release")
+    (lib.cmakeBool "DISABLE_WERROR" true)
     # Disable kernel module building (we use mainline amdxdna)
-    "-DXRT_DKMS_DRIVER_SRC_BASE_DIR="
+    (lib.cmakeFeature "XRT_DKMS_DRIVER_SRC_BASE_DIR" "")
     # XRT_UPSTREAM_DEBIAN enables XRT_UPSTREAM which propagates to AIEBU_UPSTREAM
     # This disables static linking in aiebu tools
-    # See: src/CMake/settings.cmake lines 19-21
-    "-DXRT_UPSTREAM_DEBIAN=ON"
+    (lib.cmakeBool "XRT_UPSTREAM_DEBIAN" true)
     # Override install dirs to relative paths to prevent aiebu cmake path issues
-    # aiebu concatenates CMAKE_BINARY_DIR + CMAKE_INSTALL_LIBDIR which breaks with absolute paths
-    "-DCMAKE_INSTALL_LIBDIR=lib"
-    "-DCMAKE_INSTALL_BINDIR=bin"
-    "-DCMAKE_INSTALL_INCLUDEDIR=include"
+    (lib.cmakeFeature "CMAKE_INSTALL_LIBDIR" "lib")
+    (lib.cmakeFeature "CMAKE_INSTALL_BINDIR" "bin")
+    (lib.cmakeFeature "CMAKE_INSTALL_INCLUDEDIR" "include")
     # Enable Python bindings (pyxrt) for IRON/mlir-aie integration
-    "-DXRT_ENABLE_PYXRT=ON"
-    "-DPython3_EXECUTABLE=${pythonWithPackages}/bin/python3"
-    "-DPython3_INCLUDE_DIR=${pythonWithPackages}/include/python3.12"
-    "-DPython3_LIBRARY=${pythonWithPackages}/lib/libpython3.12.so"
-    "-DPYTHON_EXECUTABLE=${pythonWithPackages}/bin/python3"
+    (lib.cmakeBool "XRT_ENABLE_PYXRT" true)
+    (lib.cmakeFeature "Python3_EXECUTABLE" "${finalAttrs.pythonEnv}/bin/python3")
+    (lib.cmakeFeature "Python3_INCLUDE_DIR" "${finalAttrs.pythonEnv}/include/python3.12")
+    (lib.cmakeFeature "Python3_LIBRARY" "${finalAttrs.pythonEnv}/lib/libpython3.12.so")
+    (lib.cmakeFeature "PYTHON_EXECUTABLE" "${finalAttrs.pythonEnv}/bin/python3")
   ];
 
-  # Skip building kernel modules and fix Nix-specific issues
   postPatch = ''
     # Fix Python3 detection for pybind11/pyxrt build
-    # The cmake tries to run /usr/bin/python3 which doesn't exist in Nix sandbox
     substituteInPlace src/python/pybind11/CMakeLists.txt \
-      --replace-quiet '/usr/bin/python3' "${pythonWithPackages}/bin/python3" || true
+      --replace-quiet '/usr/bin/python3' "${finalAttrs.pythonEnv}/bin/python3" || true
 
     # Remove kernel module references
     substituteInPlace src/CMakeLists.txt \
       --replace-quiet 'add_subdirectory(runtime_src/core/pcie/driver)' '#add_subdirectory(runtime_src/core/pcie/driver)' || true
-
-    # Fix hardcoded /usr/src DKMS install path
-    # Redirect to $out/share/xrt-dkms-src instead of /usr/src
-    for f in src/CMake/version.cmake src/CMake/dkms.cmake src/CMake/dkms-edge.cmake; do
-      if [ -f "$f" ]; then
-        sed -i 's|/usr/src/xrt-|''${CMAKE_INSTALL_PREFIX}/share/xrt-dkms-src/xrt-|g' "$f"
-      fi
-    done
-    if [ -f src/CMake/dkms-aws.cmake ]; then
-      sed -i 's|/usr/src/xrt-aws-|''${CMAKE_INSTALL_PREFIX}/share/xrt-dkms-src/xrt-aws-|g' src/CMake/dkms-aws.cmake
-    fi
-
-    # Fix hardcoded /usr/local/bin install paths for xbflash tools
-    for f in src/runtime_src/core/tools/xbflash2/CMakeLists.txt src/runtime_src/core/pcie/tools/xbflash.qspi/CMakeLists.txt; do
-      if [ -f "$f" ]; then
-        sed -i 's|"/usr/local/bin"|"''${CMAKE_INSTALL_PREFIX}/bin"|g' "$f"
-      fi
-    done
-
-    # Fix /etc/OpenCL/vendors path for OpenCL ICD registration
-    if [ -f src/CMake/icd.cmake ]; then
-      sed -i 's|/etc/OpenCL/vendors|''${CMAKE_INSTALL_PREFIX}/etc/OpenCL/vendors|g' src/CMake/icd.cmake
-    fi
-
-    # Fix hardcoded paths
-    substituteInPlace src/runtime_src/core/common/config_reader.cpp \
-      --replace-quiet '/opt/xilinx/xrt' '${placeholder "out"}/opt/xilinx/xrt' || true
 
     # Fix /etc/os-release access - create a fake one for the build
     mkdir -p $TMPDIR/etc
@@ -149,20 +116,12 @@ stdenv.mkDerivation rec {
     find . -name "*.cmake" -o -name "CMakeLists.txt" | xargs sed -i \
       -e 's|/etc/os-release|'$TMPDIR'/etc/os-release|g' || true
 
-    # Disable Werror globally
+    # Disable Werror globally (can appear in many files)
     find . -name "CMakeLists.txt" -exec sed -i 's/-Werror//g' {} \; || true
 
-    # Note: XRT_UPSTREAM_DEBIAN=ON sets AIEBU_UPSTREAM which disables static linking
-    # via "if (NOT AIEBU_UPSTREAM)" guards in the CMake files
-
     # Create stub markdown_graphviz_svg.py module to avoid network download
-    # The spec_tool.py imports this as a markdown extension
-    # The spec_tool uses GraphvizBlocksExtension() for HTML doc generation
     cat > src/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py << 'PYEOF'
 # Stub implementation of markdown_graphviz_svg for Nix build
-# The real module is https://github.com/Tanami/markdown-graphviz-svg
-# This stub provides minimal interface to avoid import errors
-
 from markdown.extensions import Extension
 
 class GraphvizBlocksExtension(Extension):
@@ -170,7 +129,6 @@ class GraphvizBlocksExtension(Extension):
     def extendMarkdown(self, md):
         pass
 
-# Also provide the original class names for compatibility
 GraphvizExtension = GraphvizBlocksExtension
 
 def makeExtension(**kwargs):
@@ -178,45 +136,25 @@ def makeExtension(**kwargs):
 PYEOF
 
     # Replace wget command in specification CMakeLists.txt
-    # The wget downloads a Python module - we use our stub instead
-    # The command is split across multiple lines, so just replace 'wget' with 'true #'
     find . -name "CMakeLists.txt" -exec grep -l "wget" {} \; | while read f; do
-      echo "Patching wget out of: $f"
-      # Replace wget with true - this disables the network download
-      # The stub file is pre-created in preInstall phase
       sed -i 's|COMMAND wget|COMMAND true # wget|g' "$f"
       sed -i 's|COMMAND powershell wget|COMMAND true # powershell wget|g' "$f"
     done
 
-    # Disable the spec generation targets during install
-    # The build phase generates these files correctly, but install-time regeneration
-    # with spec_tool.py produces incomplete output (no disassembler code)
-    # Replace entire add_custom_target blocks with empty targets
+    # Disable spec generation targets during install (causes issues)
     specCmake="src/runtime_src/core/common/aiebu/specification/aie2ps/CMakeLists.txt"
     if [ -f "$specCmake" ]; then
-      echo "Disabling spec generation in $specCmake"
-      # Create empty stub CMakeLists that does nothing
       cat > "$specCmake" << 'STUBCMAKE'
 # SPDX-License-Identifier: MIT
 # Disabled for Nix build - spec generation causes issues
-# The ISA headers are generated during build phase
 message(STATUS "Skipping aie2ps spec generation (Nix build)")
 STUBCMAKE
     fi
 
-    # Fix spec_tool.py shebang issue - the script uses #!/usr/bin/env python3
-    # which doesn't work in Nix sandbox (no /usr/bin/env)
-    # Use patchShebangs to fix all Python scripts to use the Nix Python
+    # Fix shebangs for Python scripts
     patchShebangs --build src/runtime_src/core/common/aiebu/specification/
     patchShebangs --build src/runtime_src/core/common/aiebu/src/python/ || true
-
-    # Verify the stub exists where aiebu expects it
-    echo "Created stub at: src/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py"
-    ls -la src/runtime_src/core/common/aiebu/specification/markdown_graphviz_svg.py
   '';
-
-  # Note: markdown_graphviz_svg.py stub is created once in postPatch.
-  # The preInstall stub was removed as spec generation is disabled via CMakeLists.txt stub.
 
   postInstall = ''
     # Create convenience symlinks at top level
@@ -224,39 +162,42 @@ STUBCMAKE
 
     # Link binaries
     for bin in $out/opt/xilinx/xrt/bin/*; do
-      ln -sf $bin $out/bin/
+      if [ -f "$bin" ] || [ -L "$bin" ]; then
+        ln -sf "$bin" $out/bin/
+      fi
     done
 
     # Link libraries
-    for lib in $out/opt/xilinx/xrt/lib/*.so*; do
-      ln -sf $lib $out/lib/
+    for f in $out/opt/xilinx/xrt/lib/*.so*; do
+      if [ -f "$f" ] || [ -L "$f" ]; then
+        ln -sf "$f" $out/lib/
+      fi
     done
 
     # Copy setup script
     cp $out/opt/xilinx/xrt/setup.sh $out/ || true
 
-    # Create pkg-config file
+    # Create pkg-config file in standard location
     mkdir -p $out/lib/pkgconfig
     cat > $out/lib/pkgconfig/xrt.pc << EOF
-    prefix=$out/opt/xilinx/xrt
-    exec_prefix=\''${prefix}
-    libdir=\''${exec_prefix}/lib
-    includedir=\''${prefix}/include
+prefix=$out/opt/xilinx/xrt
+exec_prefix=\''${prefix}
+libdir=\''${exec_prefix}/lib
+includedir=\''${prefix}/include
 
-    Name: XRT
-    Description: Xilinx Runtime for AMD NPU
-    Version: ${version}
-    Libs: -L\''${libdir} -lxrt_coreutil
-    Cflags: -I\''${includedir}
-    EOF
+Name: XRT
+Description: Xilinx Runtime for AMD NPU
+Version: ${finalAttrs.version}
+Libs: -L\''${libdir} -lxrt_coreutil
+Cflags: -I\''${includedir}
+EOF
   '';
 
-  meta = with lib; {
+  meta = {
     description = "Xilinx Runtime (XRT) for AMD Ryzen AI NPU";
     homepage = "https://github.com/Xilinx/XRT";
-    license = licenses.asl20;
+    license = lib.licenses.asl20;
     platforms = [ "x86_64-linux" ];
-    # For nixpkgs: maintainers = with maintainers; [ robcohen ];
     maintainers = [ ];
   };
-}
+})
