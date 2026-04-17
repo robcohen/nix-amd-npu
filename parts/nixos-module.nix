@@ -153,7 +153,7 @@
 
           # Warnings for common configuration issues
           warnings =
-            lib.optional (cfg.group != "video" && !(builtins.elem cfg.group config.users.groups))
+            lib.optional (cfg.group != "video" && !(builtins.elem cfg.group (builtins.attrNames config.users.groups)))
               "hardware.amd-npu.group is set to '${cfg.group}' but this group doesn't exist. NPU access may not work.";
         };
       };
