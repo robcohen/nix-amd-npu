@@ -1,6 +1,44 @@
 # nix-amd-npu
 
+> **Archived 2026-11-15.** No longer maintained, and no longer in use by its author.
+> It stays readable because other projects pin it — see
+> [What replaced this](#what-replaced-this) below. The tracker is closed to new
+> activity, and the pull requests left open here will not be merged.
+
 Nix flake for AMD Ryzen AI NPU support on NixOS.
+
+## What replaced this
+
+None of this flake is depended on any more. The AMD NPU stack on NixOS now comes
+from upstream, in three pieces:
+
+| then, here | now |
+|---|---|
+| `pkgs/xrt`, `pkgs/xrt-plugin-amdxdna` built from `xdna-driver` sources by hand | [nixpkgs PR #513841](https://github.com/NixOS/nixpkgs/pull/513841) (`JohnMolotov/nixpkgs`, branch `fastflowlm`) packages XRT, the XDNA shim plugin and `fastflowlm` together |
+| `pkgs/amdxdna-driver` | the `amdxdna` kernel driver is mainline as of Linux 7.0 and auto-loads via PCI device match — nothing to package |
+| `pkgs/amdxdna-firmware` fetched from `amd-ipu-staging` | firmware comes with the above, pinned by commit rather than branch |
+
+The replacement as actually consumed is vendored at
+`packages/xrt/{package.nix,xdna.nix}` and `packages/fastflowlm/` in a private NixOS
+configuration, with a one-character fix to `xdna.nix` (`tagv` → `tag`) that the
+upstream PR still needs. Delete that vendoring once #513841 merges.
+
+### For anyone still building from this flake
+
+Two independent failures were reported and neither is fixed here:
+
+- **#4** — `amdxdna-firmware` 404s. Upstream deleted `amdnpu/17f0_00/` from
+  `amd-ipu-staging`; the equivalent directory is now `17f0_10/`.
+- **#2** — `xdna-driver` tag `2.21.75` mismatches the `XRT` tag pinned in
+  `lib/versions.nix`; the two release on different schedules.
+
+The root cause of #4 is that `pkgs/amdxdna-firmware/default.nix` points at
+`amd-ipu-staging`, **a moving branch**, so every firmware filename it names rots
+when AMD renames one. Fix by pinning a commit SHA. Note that
+[pull #5](https://github.com/robcohen/nix-amd-npu/pull/5) took the other route —
+substituting new filenames — and those filenames have since been renamed again
+(`npu.sbin.2.11.0.51` is gone; the directory now carries `npu.sbin.2.24.1.231`).
+
 
 ## Status
 
